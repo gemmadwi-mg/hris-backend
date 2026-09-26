@@ -16,7 +16,7 @@ return new class extends Migration
             // Gunakan foreignUuid untuk relasi ke UUID
             $table->foreignUuid('department_id')->constrained()->restrictOnDelete();
             $table->string('nama_jabatan');
-            $table->decimal('standar_gaji_pokok', 15, 2);
+            $table->decimal('standar_gaji_pokok', 15, 2); // 15 digit total, 2 desimal (aman untuk mata uang)
             $table->timestamps();
             $table->softDeletes();
         });

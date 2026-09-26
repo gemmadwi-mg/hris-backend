@@ -14,9 +14,9 @@ return new class extends Migration
         Schema::create('departments', function (Blueprint $table) {
             $table->uuid('id')->primary(); // UUID Primary Key
             $table->string('nama_departemen');
-            $table->string('kode_departemen')->unique();
+            $table->string('kode_departemen')->unique(); // contoh: IT, HRD, FIN
             $table->timestamps();
-            $table->softDeletes();
+            $table->softDeletes(); // Standar Enterprise: Data tidak benar-benar dihapus dari DB
         });
     }
 

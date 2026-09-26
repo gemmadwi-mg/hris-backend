@@ -16,11 +16,13 @@ return new class extends Migration
             $table->foreignUuid('user_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignUuid('position_id')->constrained()->restrictOnDelete();
 
-            $table->string('nip')->unique();
+            $table->string('nip')->unique(); // Nomor Induk Pegawai
             $table->string('nama_lengkap');
             $table->string('email')->unique();
             $table->string('nomor_telepon')->nullable();
             $table->date('tanggal_bergabung');
+
+            // Data Pembayaran
             $table->string('nama_bank')->nullable();
             $table->string('nomor_rekening')->nullable();
 
