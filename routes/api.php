@@ -30,6 +30,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/attendances/clock-in', [AttendanceController::class, 'clockIn']);
     Route::post('/attendances/clock-out', [AttendanceController::class, 'clockOut']);
 
+    Route::get('/attendances/today', [AttendanceController::class, 'todayAttendances']);
+
+    
     // Endpoint Cuti Karyawan
     Route::post('/leaves', [LeaveController::class, 'store']);
     Route::get('/leaves/my-requests', [LeaveController::class, 'myLeaves']);
@@ -62,5 +65,12 @@ Route::middleware('auth:sanctum')->group(function () {
         $request->user()->unreadNotifications->markAsRead();
 
         return response()->json(['message' => 'Sukses']);
+    });
+
+    Route::delete('/notifications/clear', function (Request $request) {
+        // Hanya menghapus notifikasi yang memiliki status "Sudah Dibaca" (read_at tidak null)
+        $request->user()->readNotifications()->delete();
+
+        return response()->json(['message' => 'Notifikasi lama berhasil dihapus']);
     });
 });

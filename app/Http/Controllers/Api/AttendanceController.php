@@ -63,4 +63,16 @@ class AttendanceController extends Controller
 
         return response()->json(['message' => 'Berhasil Clock-out', 'data' => $attendance], 200);
     }
+
+    public function todayAttendances()
+{
+    // SEBELUMNYA: Attendance::with('employee.department')
+    // UBAH MENJADI:
+    $attendances = Attendance::with('employee')
+        ->whereDate('created_at', today())
+        ->orderBy('clock_in', 'desc')
+        ->get();
+        
+    return response()->json($attendances);
+}
 }
