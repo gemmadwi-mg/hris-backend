@@ -13,8 +13,9 @@ return new class extends Migration
     {
         Schema::create('employees', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            $table->foreignUuid('user_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignUuid('position_id')->constrained()->restrictOnDelete();
+            // Relasi ke akun login (User) dan jabatan
+            $table->foreignUuid('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignUuid('position_id')->constrained('positions')->cascadeOnDelete();
 
             $table->string('nip')->unique(); // Nomor Induk Pegawai
             $table->string('nama_lengkap');

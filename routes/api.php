@@ -1,9 +1,12 @@
 <?php
 
+use App\Http\Controllers\Api\AttendanceController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\EmployeeController;
+use App\Http\Controllers\Api\LeaveController;
 use App\Http\Controllers\Api\PayrollController;
 use App\Http\Controllers\Api\PositionController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 // Rute Publik (Tidak perlu login)
@@ -23,4 +26,41 @@ Route::middleware('auth:sanctum')->group(function () {
     // Taruh di dalam Route::middleware('auth:sanctum')->group(...)
     Route::get('/positions', [PositionController::class, 'index']);
 
+    // Endpoint Absensi Karyawan
+    Route::post('/attendances/clock-in', [AttendanceController::class, 'clockIn']);
+    Route::post('/attendances/clock-out', [AttendanceController::class, 'clockOut']);
+
+    // Endpoint Cuti Karyawan
+    Route::post('/leaves', [LeaveController::class, 'store']);
+    Route::get('/leaves/my-requests', [LeaveController::class, 'myLeaves']);
+
+    // --- ENDPOINT UNTUK MANAGER & HR ---
+    // Melihat semua pengajuan cuti
+    Route::get('/leaves/all', [LeaveController::class, 'index']);
+
+    // Menyetujui / Menolak cuti (menggunakan parameter UUID cuti)
+    Route::patch('/leaves/{leave}/status', [LeaveController::class, 'updateStatus']);
+
+    // Endpoint HR/Manager untuk memproses gaji (Generate)
+    Route::post('/payrolls/generate', [PayrollController::class, 'generate']);
+
+    // Endpoint Karyawan untuk melihat slip gajinya sendiri
+    Route::get('/my-payslips', [PayrollController::class, 'myPayslips']);
+
+    Route::get('/leaves/{leave}/document', [LeaveController::class, 'downloadDocument']);
+
+    Route::get('/notifications', function (Request $request) {
+        return response()->json([
+            'unread_count' => $request->user()->unreadNotifications()->count(),
+            // Ambil 20 notifikasi terbaru (baik yang sudah/belum dibaca)
+            'notifications' => $request->user()->notifications()->take(20)->get(),
+        ]);
+    });
+
+    Route::post('/notifications/mark-read', function (Request $request) {
+        // Tandai semua notifikasi milik user ini menjadi "Sudah Dibaca"
+        $request->user()->unreadNotifications->markAsRead();
+
+        return response()->json(['message' => 'Sukses']);
+    });
 });

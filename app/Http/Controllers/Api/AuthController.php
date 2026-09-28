@@ -17,14 +17,16 @@ class AuthController extends Controller
 
         if (Auth::attempt($credentials)) {
             $user = Auth::user();
-
-            // GENERATE API TOKEN DI SINI
             $token = $user->createToken('hris-token')->plainTextToken;
+
+            // Ambil nama role pertama milik user ini (misal: "HR", "Manager", atau "Karyawan")
+            $roleName = $user->roles->first()->name ?? 'Karyawan';
+            $user->role = $roleName; // Sisipkan ke object user
 
             return response()->json([
                 'message' => 'Login sukses',
                 'user' => $user,
-                'token' => $token, // Kirim token ke Vue
+                'token' => $token,
             ], 200);
         }
 
