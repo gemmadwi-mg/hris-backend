@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AttendanceController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\LeaveController;
 use App\Http\Controllers\Api\PayrollController;
@@ -14,6 +15,8 @@ Route::post('/login', [AuthController::class, 'login']);
 
 // Rute Terlindungi (Wajib login membawa Cookie Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/dashboard/summary', [DashboardController::class, 'getSummary']);
+
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
@@ -29,10 +32,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Endpoint Absensi Karyawan
     Route::post('/attendances/clock-in', [AttendanceController::class, 'clockIn']);
     Route::post('/attendances/clock-out', [AttendanceController::class, 'clockOut']);
-
     Route::get('/attendances/today', [AttendanceController::class, 'todayAttendances']);
+    Route::get('/attendances/filtered', [AttendanceController::class, 'getAttendances']);
+    Route::post('/attendances/import', [AttendanceController::class, 'importExcel']);
+    // TAMBAHKAN INI:
+    Route::get('/attendances/import-progress', [AttendanceController::class, 'checkImportProgress']);
 
-    
     // Endpoint Cuti Karyawan
     Route::post('/leaves', [LeaveController::class, 'store']);
     Route::get('/leaves/my-requests', [LeaveController::class, 'myLeaves']);
@@ -44,13 +49,19 @@ Route::middleware('auth:sanctum')->group(function () {
     // Menyetujui / Menolak cuti (menggunakan parameter UUID cuti)
     Route::patch('/leaves/{leave}/status', [LeaveController::class, 'updateStatus']);
 
-    // Endpoint HR/Manager untuk memproses gaji (Generate)
+    Route::get('/leaves/{leave}/document', [LeaveController::class, 'downloadDocument']);
+
+    Route::get('/payrolls', [PayrollController::class, 'index']);
+    // Route khusus HRD / Manajer
     Route::post('/payrolls/generate', [PayrollController::class, 'generate']);
 
-    // Endpoint Karyawan untuk melihat slip gajinya sendiri
+    Route::post('/payrolls/{payroll}/disburse', [PayrollController::class, 'disburse']);
+
+    // Route khusus Karyawan
     Route::get('/my-payslips', [PayrollController::class, 'myPayslips']);
 
-    Route::get('/leaves/{leave}/document', [LeaveController::class, 'downloadDocument']);
+    // Route unduh PDF (Dipakai HRD maupun Karyawan)
+    Route::get('/employees/{id}/payslip', [PayrollController::class, 'downloadPayslip']);
 
     Route::get('/notifications', function (Request $request) {
         return response()->json([
@@ -74,3 +85,6 @@ Route::middleware('auth:sanctum')->group(function () {
         return response()->json(['message' => 'Notifikasi lama berhasil dihapus']);
     });
 });
+
+// Rute publik khusus untuk menerima notifikasi dari Xendit
+Route::post('/webhooks/xendit', [PayrollController::class, 'xenditWebhook']);
