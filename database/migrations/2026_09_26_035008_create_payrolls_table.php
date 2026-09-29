@@ -24,7 +24,7 @@ return new class extends Migration
             $table->decimal('potongan', 15, 2)->default(0); // misal: BPJS, PPh21, Keterlambatan
             $table->decimal('total_gaji_bersih', 15, 2);
 
-            $table->enum('status', ['draft', 'paid'])->default('draft');
+            $table->enum('status', ['pending', 'paid', 'failed']);
             $table->date('tanggal_pembayaran')->nullable();
 
             $table->timestamps();

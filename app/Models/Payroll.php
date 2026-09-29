@@ -13,7 +13,7 @@ class Payroll extends Model
     protected $fillable = [
         'employee_id', 'bulan', 'tahun', 'gaji_pokok',
         'tunjangan', 'potongan', 'total_gaji_bersih',
-        'status', 'tanggal_pembayaran',
+        'status', 'tanggal_pembayaran', 'xendit_disbursement_id' // <- Tambahkan di sini
     ];
 
     protected $casts = [
