@@ -9,15 +9,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('attendances', function (Blueprint $table) {
-            // Menambahkan kolom baru setelah kolom location (lokasi masuk)
-            $table->string('clock_out_location')->nullable()->after('location');
+            // Mengubah kolom jam masuk dan jam keluar agar boleh bernilai NULL
+            $table->time('clock_in_time')->nullable()->change();
+            $table->time('clock_out_time')->nullable()->change();
         });
     }
 
     public function down(): void
     {
         Schema::table('attendances', function (Blueprint $table) {
-            $table->dropColumn('clock_out_location');
+            $table->time('clock_in_time')->nullable(false)->change();
+            $table->time('clock_out_time')->nullable(false)->change();
         });
     }
 };

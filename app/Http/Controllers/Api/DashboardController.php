@@ -3,62 +3,67 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Attendance;
+use Illuminate\Http\Request;
 use App\Models\Employee;
-use App\Models\Leave;
 use App\Models\Payroll;
 use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
-    public function getSummary()
+    public function index()
     {
-        $hariIni = Carbon::today()->format('Y-m-d');
-        $bulanIni = date('m');
-        $tahunIni = date('Y');
+        $currentMonth = (int) date('m');
+        $currentYear = (int) date('Y');
 
-        // 1. Ringkasan Kartu (Cards)
+        // 1. Kartu Metrik Utama (Bulan Ini)
         $totalEmployees = Employee::count();
+        $totalNetSalary = Payroll::where('period_month', $currentMonth)
+                            ->where('period_year', $currentYear)
+                            ->where('status', 'Approved')
+                            ->sum('net_salary');
+        $totalPph21 = Payroll::where('period_month', $currentMonth)
+                            ->where('period_year', $currentYear)
+                            ->where('status', 'Approved')
+                            ->sum('pph21_deduction');
 
-        $hadirHariIni = Attendance::where('tanggal', $hariIni)->where('status', 'Hadir')->count();
+        // 2. Data Grafik 6 Bulan Terakhir
+        $chartCategories = [];
+        $grossSeries = [];
+        $netSeries = [];
 
-        $pendingLeaves = Leave::where('status', 'Pending')->count();
+        for ($i = 5; $i >= 0; $i--) {
+            $date = Carbon::now()->subMonths($i);
+            $m = (int) $date->format('m');
+            $y = (int) $date->format('Y');
+            
+            $monthName = $date->translatedFormat('M Y'); // ex: Oct 2026
+            $chartCategories[] = $monthName;
 
-        $payrollExpense = Payroll::where('bulan', $bulanIni)
-            ->where('tahun', $tahunIni)
-            ->sum('total_gaji_bersih');
+            $payrolls = Payroll::where('period_month', $m)
+                            ->where('period_year', $y)
+                            ->where('status', 'Approved')
+                            ->get();
 
-        // 2. Data untuk Grafik (Cuti Bulan Ini)
-        $leavesThisMonth = Leave::whereMonth('created_at', $bulanIni)->get();
-        $approvedLeaves = $leavesThisMonth->where('status', 'Approved')->count();
-        $rejectedLeaves = $leavesThisMonth->where('status', 'Rejected')->count();
-        $pendingLeavesBulanIni = $leavesThisMonth->where('status', 'Pending')->count();
-
-        // 3. Data untuk Grafik (Tren Kehadiran 7 Hari Terakhir)
-        $attendanceTrend = [];
-        $categories = [];
-        for ($i = 6; $i >= 0; $i--) {
-            $date = Carbon::today()->subDays($i);
-            $categories[] = $date->format('d M');
-            $attendanceTrend[] = Attendance::where('tanggal', $date->format('Y-m-d'))
-                ->where('status', 'Hadir')
-                ->count();
+            $grossSeries[] = $payrolls->sum('gross_salary');
+            $netSeries[] = $payrolls->sum('net_salary');
         }
 
         return response()->json([
-            'cards' => [
-                'total_employees' => $totalEmployees,
-                'present_today' => $hadirHariIni,
-                'pending_leaves' => $pendingLeaves,
-                'payroll_expense' => $payrollExpense,
-            ],
-            'charts' => [
-                'leave_distribution' => [$approvedLeaves, $pendingLeavesBulanIni, $rejectedLeaves],
-                'attendance_trend' => [
-                    'categories' => $categories,
-                    'data' => $attendanceTrend,
+            'success' => true,
+            'data' => [
+                'metrics' => [
+                    'total_employees' => $totalEmployees,
+                    'total_net_salary' => $totalNetSalary,
+                    'total_pph21' => $totalPph21
                 ],
-            ],
+                'chart' => [
+                    'categories' => $chartCategories,
+                    'series' => [
+                        [ 'name' => 'Gross Salary', 'data' => $grossSeries ],
+                        [ 'name' => 'Take Home Pay', 'data' => $netSeries ]
+                    ]
+                ]
+            ]
         ]);
     }
 }

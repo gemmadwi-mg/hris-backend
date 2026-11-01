@@ -3,155 +3,183 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Imports\AttendancesImport;
 use App\Models\Attendance;
-use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Maatwebsite\Excel\Facades\Excel;
+use Illuminate\Support\Str;
 
 class AttendanceController extends Controller
 {
-    public function clockIn(Request $request)
+    public function index(Request $request)
     {
-        $employee = $request->user()->employee;
+        // Eager load relasi karyawan dan cabang
+        $query = Attendance::with(['employee', 'branch']);
 
-        if (! $employee) {
-            return response()->json(['message' => 'Profil karyawan tidak ditemukan.'], 404);
+        $user = $request->user();
+        $employeeId = $user->employee_id ?? $user->employee?->employee_id;
+
+        // 🔒 1. PROTEKSI: Jika login sebagai Karyawan (bukan Admin/HRD), kunci query khusus data dirinya
+        if ($user->hasRole('Employee') || $request->has('my_attendances')) {
+            if ($employeeId) {
+                $query->where('employee_id', $employeeId);
+            }
         }
 
-        $today = Carbon::today()->toDateString();
-
-        // Cek apakah sudah absen masuk hari ini
-        $alreadyClockedIn = Attendance::where('employee_id', $employee->id)
-            ->where('tanggal', $today)
-            ->exists();
-
-        if ($alreadyClockedIn) {
-            return response()->json(['message' => 'Anda sudah melakukan clock-in hari ini.'], 400);
+        // 📅 2. FILTER BULAN (Format YYYY-MM dari frontend)
+        if ($request->filled('month')) {
+            $query->where('date', 'like', "{$request->month}%");
         }
 
-        $attendance = Attendance::create([
-            'employee_id' => $employee->id,
-            'tanggal' => $today,
-            'clock_in' => Carbon::now(),
-            // Contoh hardcode lokasi, nantinya bisa diambil dari GPS device browser
-            'location' => $request->input('location', 'Tambak Anakan, Surabaya'),
-            'status' => 'Hadir',
-        ]);
+        // 🔍 3. FITUR PENCARIAN (Berdasarkan nama karyawan atau ID presensi)
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->whereHas('employee', function ($empQ) use ($search) {
+                    $empQ->where('full_name', 'like', "%{$search}%");
+                })->orWhere('attendance_id', 'like', "%{$search}%");
+            });
+        }
 
-        return response()->json(['message' => 'Berhasil Clock-in', 'data' => $attendance], 201);
+        if ($request->filled('status')) {
+            $query->where('attendance_status', $request->status);
+        }
+
+        // Ambil data terbaru, 10 per halaman
+        $attendances = $query->orderBy('date', 'desc')
+            ->orderBy('clock_in_time', 'desc')
+            ->paginate(10);
+
+        return response()->json(['success' => true, 'data' => $attendances], 200);
     }
 
-    public function clockOut(Request $request)
+    public function store(Request $request)
     {
-        $employee = $request->user()->employee;
-        $today = Carbon::today()->toDateString();
+        $user = $request->user();
 
-        $attendance = Attendance::where('employee_id', $employee->id)
-            ->where('tanggal', $today)
+        $employeeId = $request->input('employee_id') ?? $user->employee_id ?? $user->employee?->employee_id;
+        $branchId = $request->input('branch_id') ?? $user->branch_id ?? $user->employee?->branch_id ?? 'BRANCH01';
+
+        if (! $employeeId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data Karyawan (employee_id) tidak ditemukan pada akun ini.',
+            ], 422);
+        }
+
+        $request->validate([
+            'type' => 'required|in:In,Out',
+            'latitude' => 'required',
+            'longitude' => 'required',
+            'photo' => 'nullable|image|mimes:jpeg,jpg,png|max:5120',
+        ]);
+
+        $today = now()->format('Y-m-d');
+        $nowDateTime = now()->format('Y-m-d H:i:s');
+        $coordinates = $request->latitude.','.$request->longitude;
+
+        $photoPath = null;
+        if ($request->hasFile('photo')) {
+            $photoPath = $request->file('photo')->store('attendances', 'public');
+        }
+
+        $scheduleIn = now()->setTime(8, 0, 0);
+        $scheduleOut = now()->setTime(17, 0, 0);
+
+        $attendance = Attendance::where('employee_id', $employeeId)
+            ->where('date', $today)
             ->first();
 
-        if (! $attendance) {
-            return response()->json(['message' => 'Anda belum clock-in hari ini.'], 400);
-        }
-
-        if ($attendance->clock_out) {
-            return response()->json(['message' => 'Anda sudah melakukan clock-out.'], 400);
-        }
-
-        // PERBARUI BAGIAN INI: Simpan jam pulang sekaligus lokasi pulangnya
-        $attendance->update([
-            'clock_out' => Carbon::now(),
-            'clock_out_location' => $request->input('location_out'), 
-        ]);
-
-        return response()->json(['message' => 'Berhasil Clock-out', 'data' => $attendance], 200);
-    }
-
-    public function todayAttendances()
-    {
-        // SEBELUMNYA: Attendance::with('employee.department')
-        // UBAH MENJADI:
-        $attendances = Attendance::with('employee')
-            ->whereDate('created_at', today())
-            ->orderBy('clock_in', 'desc')
-            ->get();
-
-        return response()->json($attendances);
-    }
-
-    public function getAttendances(Request $request)
-    {
-        $query = Attendance::with('employee');
-
-        // Filter berdasarkan tanggal tertentu (Format: YYYY-MM-DD)
-        if ($request->has('date')) {
-            $query->whereDate('tanggal', $request->date);
-        } 
-        // Filter berdasarkan Bulan & Tahun (Format: YYYY-MM)
-        else if ($request->has('month')) {
-            // Misal request: 2026-09
-            $parts = explode('-', $request->month);
-            if (count($parts) == 2) {
-                $query->whereYear('tanggal', $parts[0])
-                      ->whereMonth('tanggal', $parts[1]);
+        // LOGIKA ABSEN MASUK (CLOCK IN)
+        if ($request->type === 'In') {
+            if ($attendance && $attendance->clock_in_time) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda sudah melakukan Clock In hari ini.',
+                ], 422);
             }
-        } 
-        // Default: Ambil data hari ini jika tidak ada filter
+
+            $isLate = now()->gt($scheduleIn);
+            $clockInStatus = $isLate ? 'Late' : 'On Time';
+            $lateDuration = $isLate ? now()->diff($scheduleIn)->format('%H:%I:%S') : null;
+
+            if (! $attendance) {
+                $attendance = Attendance::create([
+                    'attendance_id' => 'AT'.date('ymd').strtoupper(Str::random(2)),
+                    'employee_id' => $employeeId,
+                    'branch_id' => $branchId,
+                    'date' => $today,
+                    'attendance_status' => 'Present',
+                    'clock_in_time' => $nowDateTime,
+                    'clock_in_status' => $clockInStatus,
+                    'late_duration' => $lateDuration,
+                    'clock_in_coordinates' => $coordinates,
+                    'clock_in_photo' => $photoPath ?? 'manual_input.jpg',
+                ]);
+            } else {
+                $attendance->update([
+                    'clock_in_time' => $nowDateTime,
+                    'clock_in_status' => $clockInStatus,
+                    'late_duration' => $lateDuration,
+                    'clock_in_coordinates' => $coordinates,
+                    'clock_in_photo' => $photoPath ?? $attendance->clock_in_photo,
+                ]);
+            }
+        }
+        // LOGIKA ABSEN PULANG (CLOCK OUT)
         else {
-            $query->whereDate('tanggal', Carbon::today()->toDateString());
-        }
+            if (! $attendance || ! $attendance->clock_in_time) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda belum melakukan Clock In hari ini.',
+                ], 422);
+            }
 
-        // Urutkan berdasarkan waktu masuk terbaru, lalu kirim
-        $attendances = $query->orderBy('clock_in', 'desc')->get();
-        return response()->json($attendances);
-    }
+            if ($attendance->clock_out_time) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda sudah melakukan Clock Out hari ini.',
+                ], 422);
+            }
 
-    public function importExcel(Request $request)
-    {
-        $request->validate([
-            'file' => 'required|mimes:xlsx,xls,csv|max:10240',
-        ]);
+            $isEarly = now()->lt($scheduleOut);
+            $clockOutStatus = $isEarly ? 'Early Depart' : 'On Time';
+            $earlyLeaveDuration = $isEarly ? $scheduleOut->diff(now())->format('%H:%I:%S') : null;
 
-        try {
-            // EKSEKUSI LANGSUNG DI TEMPAT (Synchronous)
-            Excel::import(new AttendancesImport, $request->file('file'));
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Data absensi berhasil diimpor sepenuhnya.'
+            $attendance->update([
+                'clock_out_time' => $nowDateTime,
+                'clock_out_status' => $clockOutStatus,
+                'early_leave_duration' => $earlyLeaveDuration,
+                'clock_out_coordinates' => $coordinates,
+                'clock_out_photo' => $photoPath ?? 'manual_input.jpg',
             ]);
-            
-        // 2. UBAH \Exception MENJADI \Throwable
-        } catch (\Throwable $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error Server: ' . $e->getMessage(),
-                'line' => $e->getLine(),
-                'file' => $e->getFile()
-            ], 500);
         }
-    }
-
-    // FUNGSI BARU: Untuk menjawab pertanyaan "Polling" dari Vue
-    public function checkImportProgress(Request $request)
-    {
-        $cacheKey = $request->query('cache_key');
-        $totalRows = $request->query('total_rows');
-
-        if (! $cacheKey || ! $totalRows) {
-            return response()->json(['progress' => 0, 'processed' => 0]);
-        }
-
-        // Ambil jumlah baris yang sudah diproses dari Cache
-        $processed = Cache::get($cacheKey, 0);
-        $percentage = min(100, round(($processed / $totalRows) * 100));
 
         return response()->json([
-            'progress' => $percentage,
-            'processed' => $processed,
-            'total' => $totalRows,
-        ]);
+            'success' => true,
+            'message' => 'Data absensi '.($request->type === 'In' ? 'Masuk' : 'Pulang').' berhasil disimpan.',
+            'data' => $attendance,
+        ], 200);
+    }
+
+    public function show($id)
+    {
+        $attendance = Attendance::with(['employee', 'branch'])->findOrFail($id);
+
+        return response()->json(['success' => true, 'data' => $attendance], 200);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $attendance = Attendance::findOrFail($id);
+        $attendance->update($request->all());
+
+        return response()->json(['success' => true, 'data' => $attendance], 200);
+    }
+
+    public function destroy($id)
+    {
+        $attendance = Attendance::findOrFail($id);
+        $attendance->delete();
+
+        return response()->json(['success' => true, 'message' => 'Data absensi dihapus'], 200);
     }
 }
