@@ -2,89 +2,57 @@
 
 use App\Http\Controllers\Api\AttendanceController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\EmployeeController;
-use App\Http\Controllers\Api\LeaveController;
+use App\Http\Controllers\Api\EmployeeDashboardController;
+use App\Http\Controllers\Api\LeaveRequestController;
+use App\Http\Controllers\Api\OvertimeController;
 use App\Http\Controllers\Api\PayrollController;
-use App\Http\Controllers\Api\PositionController;
+use App\Http\Controllers\Api\PermitRequestController;
+use App\Http\Controllers\Api\ReferenceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-// Rute Publik (Tidak perlu login)
+// Rute Publik (Auth)
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
-// Rute Terlindungi (Wajib login membawa Cookie Sanctum)
+// Rute Privat (Wajib Login via Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/dashboard/summary', [DashboardController::class, 'getSummary']);
+    Route::get('/dashboard', [\App\Http\Controllers\Api\DashboardController::class, 'index']);
 
-    Route::get('/me', [AuthController::class, 'me']);
-    Route::post('/logout', [AuthController::class, 'logout']);
-
-    // Operasi CRUD Karyawan masuk ke sini
-    Route::apiResource('employees', EmployeeController::class);
-
-    // Rute untuk download PDF Slip Gaji
-    Route::get('/employees/{employee}/payslip', [PayrollController::class, 'downloadPayslip']);
-
-    // Taruh di dalam Route::middleware('auth:sanctum')->group(...)
-    Route::get('/positions', [PositionController::class, 'index']);
-
-    // Endpoint Absensi Karyawan
-    Route::post('/attendances/clock-in', [AttendanceController::class, 'clockIn']);
-    Route::post('/attendances/clock-out', [AttendanceController::class, 'clockOut']);
-    Route::get('/attendances/today', [AttendanceController::class, 'todayAttendances']);
-    Route::get('/attendances/filtered', [AttendanceController::class, 'getAttendances']);
-    Route::post('/attendances/import', [AttendanceController::class, 'importExcel']);
-    // TAMBAHKAN INI:
-    Route::get('/attendances/import-progress', [AttendanceController::class, 'checkImportProgress']);
-
-    // Endpoint Cuti Karyawan
-    Route::post('/leaves', [LeaveController::class, 'store']);
-    Route::get('/leaves/my-requests', [LeaveController::class, 'myLeaves']);
-
-    // --- ENDPOINT UNTUK MANAGER & HR ---
-    // Melihat semua pengajuan cuti
-    Route::get('/leaves/all', [LeaveController::class, 'index']);
-
-    // Menyetujui / Menolak cuti (menggunakan parameter UUID cuti)
-    Route::patch('/leaves/{leave}/status', [LeaveController::class, 'updateStatus']);
-
-    Route::get('/leaves/{leave}/document', [LeaveController::class, 'downloadDocument']);
-
-    Route::get('/payrolls', [PayrollController::class, 'index']);
-    // Route khusus HRD / Manajer
-    Route::post('/payrolls/generate', [PayrollController::class, 'generate']);
-
-    Route::post('/payrolls/{payroll}/disburse', [PayrollController::class, 'disburse']);
-
-    // Route khusus Karyawan
-    Route::get('/my-payslips', [PayrollController::class, 'myPayslips']);
-
-    // Route unduh PDF (Dipakai HRD maupun Karyawan)
-    Route::get('/employees/{id}/payslip', [PayrollController::class, 'downloadPayslip']);
-
-    Route::get('/notifications', function (Request $request) {
+    // Cek Data Diri
+    Route::get('/me', function (Request $request) {
+        // Otomatis me-load relasi role dan perusahaannya
         return response()->json([
-            'unread_count' => $request->user()->unreadNotifications()->count(),
-            // Ambil 20 notifikasi terbaru (baik yang sudah/belum dibaca)
-            'notifications' => $request->user()->notifications()->take(20)->get(),
+            'success' => true,
+            'data' => $request->user()->load(['role.permissions', 'company', 'branch']),
         ]);
     });
 
-    Route::post('/notifications/mark-read', function (Request $request) {
-        // Tandai semua notifikasi milik user ini menjadi "Sudah Dibaca"
-        $request->user()->unreadNotifications->markAsRead();
+    Route::post('/logout', [AuthController::class, 'logout']);
 
-        return response()->json(['message' => 'Sukses']);
-    });
+    // Rute Master Data / Referensi
+    Route::get('/references/employee-options', [ReferenceController::class, 'getEmployeeFormOptions']);
+    // Rute Master Karyawan
+    Route::apiResource('employees', EmployeeController::class);
+    Route::get('employee/dashboard-summary', [EmployeeDashboardController::class, 'index']);
 
-    Route::delete('/notifications/clear', function (Request $request) {
-        // Hanya menghapus notifikasi yang memiliki status "Sudah Dibaca" (read_at tidak null)
-        $request->user()->readNotifications()->delete();
+    // ... route lain ...
+    Route::apiResource('attendances', AttendanceController::class);
 
-        return response()->json(['message' => 'Notifikasi lama berhasil dihapus']);
-    });
+    Route::apiResource('leave-requests', LeaveRequestController::class);
+    Route::get('/leave-balances', [LeaveRequestController::class, 'getLeaveBalances']);
+
+    Route::apiResource('permit-requests', PermitRequestController::class);
+
+    Route::apiResource('overtimes', OvertimeController::class);
+
+    // Rute Preview harus di atas apiResource
+    Route::get('payrolls/preview', [PayrollController::class, 'preview']);
+    Route::apiResource('payrolls', PayrollController::class);
+    Route::patch('/payrolls/{id}/status', [\App\Http\Controllers\Api\PayrollController::class, 'updateStatus']);
+    Route::get('/payrolls/{id}/export-pdf', [\App\Http\Controllers\Api\PayrollController::class, 'exportPdf']);
+    Route::post('/payrolls/generate', [\App\Http\Controllers\Api\PayrollController::class, 'generateMassal']);
+    Route::post('/payrolls/{id}/disburse', [\App\Http\Controllers\Api\PayrollController::class, 'disburse']);
 });
-
-// Rute publik khusus untuk menerima notifikasi dari Xendit
-Route::post('/webhooks/xendit', [PayrollController::class, 'xenditWebhook']);

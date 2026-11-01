@@ -2,50 +2,122 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Auth\Passwords\CanResetPassword;
+use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
-class Employee extends Model
+class Employee extends Authenticatable implements CanResetPasswordContract
 {
-    use HasFactory, SoftDeletes, HasUuids;
+    use CanResetPassword, HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
+    protected $table = 'employees';
+
+    // Konfigurasi Primary Key Custom String
+    protected $primaryKey = 'employee_id';
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    /**
+     * 🛡️ MENGGUNAKAN $fillable SEBAGAI BENTENG KEAMANAN
+     * Kolom di luar daftar ini (seperti typo 'departement') akan diabaikan secara otomatis
+     * dan tidak akan menyebabkan MySQL crash dengan error 'Column not found'.
+     */
     protected $fillable = [
-        'user_id', 'position_id', 'nip', 'nama_lengkap',
-        'email', 'nomor_telepon', 'tanggal_bergabung',
-        'nama_bank', 'nomor_rekening',
+        'employee_id',
+        'full_name',
+        'nik',
+        'email',
+        'password',
+        'date_of_birth',
+        'gender',
+        'phone_number',
+        'address',
+        'job_title',
+        'department', // 👈 Nama kolom resmi di database MySQL
+        'employment_status',
+        'join_date',
+        'annual_leave_quota',
+        'role_id',
+        'company_id',
+        'branch_id',
+        'basic_salary',
+        'position_allowance',
+        'meal_allowance',
+        'transport_allowance',
+        'bank_name',
+        'account_number',
+        'account_holder_name',
+        'ptkp_group_id',
+        'bpjs_health_number',
     ];
 
-    // Konversi tipe data otomatis saat diambil dari database
+    /**
+     * 🔒 SEMBUNYIKAN FIELD SENSITIF
+     * Mencegah password ikut terkirim dalam JSON response ke Vue
+     */
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
+    /**
+     * ⚙️ CASTING TIPE DATA
+     */
     protected $casts = [
-        'tanggal_bergabung' => 'date',
+        'password' => 'hashed',
+        'date_of_birth' => 'date',
+        'join_date' => 'date',
+        'basic_salary' => 'decimal:2',
+        'position_allowance' => 'decimal:2',
+        'meal_allowance' => 'decimal:2',
+        'transport_allowance' => 'decimal:2',
     ];
 
-    // Relasi
-    public function user()
+    /**
+     * RELASI DATABASE
+     */
+    public function role()
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(Role::class, 'role_id', 'role_id');
     }
 
-    public function position()
+    public function company()
     {
-        return $this->belongsTo(Position::class);
+        return $this->belongsTo(Company::class, 'company_id', 'company_id');
     }
 
-    // --- HAS MANY (Memiliki banyak) ---
-    public function attendances()
+    public function branch()
     {
-        return $this->hasMany(Attendance::class);
+        return $this->belongsTo(Branch::class, 'branch_id', 'branch_id');
     }
 
-    public function leaves()
+    public function approver()
     {
-        return $this->hasMany(Leave::class);
+        return $this->belongsTo(Employee::class, 'approver_id', 'employee_id');
     }
 
-    public function payrolls()
+    /**
+     * FUNGSI CUSTOM RBAC (ROLE & PERMISSION)
+     */
+    public function hasPermission($permissionName)
     {
-        return $this->hasMany(Payroll::class);
+        if (! $this->role) {
+            return false;
+        }
+
+        return $this->role->permissions->contains('name', $permissionName);
+    }
+
+    public function hasRole($roleName)
+    {
+        if (! $this->role) {
+            return false;
+        }
+
+        return $this->role->role_name === $roleName;
     }
 }
