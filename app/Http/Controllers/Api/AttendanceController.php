@@ -11,25 +11,21 @@ class AttendanceController extends Controller
 {
     public function index(Request $request)
     {
-        // Eager load relasi karyawan dan cabang
         $query = Attendance::with(['employee', 'branch']);
 
         $user = $request->user();
         $employeeId = $user->employee_id ?? $user->employee?->employee_id;
 
-        // 🔒 1. PROTEKSI: Jika login sebagai Karyawan (bukan Admin/HRD), kunci query khusus data dirinya
         if ($user->hasRole('Employee') || $request->has('my_attendances')) {
             if ($employeeId) {
                 $query->where('employee_id', $employeeId);
             }
         }
 
-        // 📅 2. FILTER BULAN (Format YYYY-MM dari frontend)
         if ($request->filled('month')) {
             $query->where('date', 'like', "{$request->month}%");
         }
 
-        // 🔍 3. FITUR PENCARIAN (Berdasarkan nama karyawan atau ID presensi)
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -43,7 +39,6 @@ class AttendanceController extends Controller
             $query->where('attendance_status', $request->status);
         }
 
-        // Ambil data terbaru, 10 per halaman
         $attendances = $query->orderBy('date', 'desc')
             ->orderBy('clock_in_time', 'desc')
             ->paginate(10);
@@ -90,6 +85,26 @@ class AttendanceController extends Controller
 
         // LOGIKA ABSEN MASUK (CLOCK IN)
         if ($request->type === 'In') {
+            $now = now();
+            $earliestIn = now()->setTime(6, 0, 0);  // Jam 06:00 WIB
+            $latestIn = now()->setTime(12, 0, 0);    // Jam 12:00 WIB
+
+            // 🔒 1. PERINGATAN JAM ABSENSI DINI HARI / BELUM DIBUKA
+            if ($now->lt($earliestIn)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Presensi Masuk (Clock In) belum dibuka. Presensi dimulai pukul 06:00 WIB.',
+                ], 422);
+            }
+
+            // 🔒 2. BATAS AKHIR CLOCK IN (MAKSIMAL JAM 12 SIANG)
+            if ($now->gt($latestIn)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Presensi Masuk (Clock In) untuk hari ini telah ditutup (Maksimal pukul 12:00 WIB).',
+                ], 422);
+            }
+
             if ($attendance && $attendance->clock_in_time) {
                 return response()->json([
                     'success' => false,
@@ -97,9 +112,9 @@ class AttendanceController extends Controller
                 ], 422);
             }
 
-            $isLate = now()->gt($scheduleIn);
+            $isLate = $now->gt($scheduleIn);
             $clockInStatus = $isLate ? 'Late' : 'On Time';
-            $lateDuration = $isLate ? now()->diff($scheduleIn)->format('%H:%I:%S') : null;
+            $lateDuration = $isLate ? $now->diff($scheduleIn)->format('%H:%I:%S') : null;
 
             if (! $attendance) {
                 $attendance = Attendance::create([
@@ -126,6 +141,17 @@ class AttendanceController extends Controller
         }
         // LOGIKA ABSEN PULANG (CLOCK OUT)
         else {
+            $now = now();
+            $earliestOut = now()->setTime(16, 0, 0); // Jam 16:00 WIB
+
+            // 🔒 1. PROTEKSI JAM PULANG (Minimal Jam 16:00 WIB)
+            if ($now->lt($earliestOut)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Presensi Pulang (Clock Out) belum dibuka. Presensi pulang dapat dilakukan mulai pukul 16:00 WIB.',
+                ], 422);
+            }
+
             if (! $attendance || ! $attendance->clock_in_time) {
                 return response()->json([
                     'success' => false,
@@ -140,9 +166,9 @@ class AttendanceController extends Controller
                 ], 422);
             }
 
-            $isEarly = now()->lt($scheduleOut);
+            $isEarly = $now->lt($scheduleOut); // scheduleOut = 17:00 WIB
             $clockOutStatus = $isEarly ? 'Early Depart' : 'On Time';
-            $earlyLeaveDuration = $isEarly ? $scheduleOut->diff(now())->format('%H:%I:%S') : null;
+            $earlyLeaveDuration = $isEarly ? $scheduleOut->diff($now)->format('%H:%I:%S') : null;
 
             $attendance->update([
                 'clock_out_time' => $nowDateTime,
