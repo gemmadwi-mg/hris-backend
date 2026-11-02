@@ -5,19 +5,36 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\EmployeeLeaveBalance;
+use App\Services\AttendanceService; // 💡 1. Import AttendanceService
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 
 class EmployeeDashboardController extends Controller
 {
+    // 💡 2. Inject via Constructor
+    public function __construct(
+        protected AttendanceService $attendanceService
+    ) {}
+
     public function index(Request $request)
     {
         $user = $request->user();
         $employeeId = $user->employee_id ?? $user->employee?->employee_id;
+        $branchId = $user->branch_id ?? $user->employee?->branch_id;
         $today = Carbon::today()->format('Y-m-d');
         $currentYear = date('Y');
 
-        // 1. AMBIL SALDO CUTI TAHUNAN LANGSUNG DARI TABEL EmployeeLeaveBalance
+        if (! $employeeId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data Karyawan (employee_id) tidak ditemukan pada akun ini.',
+            ], 422);
+        }
+
+        // 💡 3. Panggil method dari Service Class
+        $this->attendanceService->syncMissingAlpha($employeeId, $branchId);
+
+        // Ambil Saldo Cuti
         $leaveBalance = EmployeeLeaveBalance::firstOrCreate(
             [
                 'employee_id' => $employeeId,
@@ -34,7 +51,7 @@ class EmployeeDashboardController extends Controller
         $usedDays = (int) $leaveBalance->used;
         $remainingQuota = max(0, $totalQuota - $usedDays);
 
-        // 2. Cek Presensi Hari Ini
+        // Cek Presensi Hari Ini
         $attendanceToday = Attendance::where('employee_id', $employeeId)
             ->where('date', $today)
             ->first();
@@ -51,7 +68,7 @@ class EmployeeDashboardController extends Controller
             ];
         }
 
-        // 3. Ambil 5 Riwayat Presensi Terakhir
+        // Ambil 5 Riwayat Presensi Terakhir
         $recentAttendances = Attendance::where('employee_id', $employeeId)
             ->orderBy('date', 'desc')
             ->orderBy('created_at', 'desc')
@@ -61,11 +78,10 @@ class EmployeeDashboardController extends Controller
                 $clockInTime = $att->clock_in_time ?? $att->clock_in;
                 $clockOutTime = $att->clock_out_time ?? $att->clock_out;
 
-                // 💡 FIX STATUS: Prioritaskan attendance_status (Present, Leave, Permit, Absent)
                 $displayStatus = match ($att->attendance_status) {
                     'Leave' => 'Cuti',
                     'Permit' => 'Izin',
-                    'Absent' => 'Alfa',
+                    'Absent', 'Alpha' => 'Alfa',
                     'Present' => $att->clock_in_status ?? 'Hadir',
                     default => $att->attendance_status ?? 'Hadir'
                 };
