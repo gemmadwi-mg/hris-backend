@@ -48,10 +48,11 @@ class AttendanceService
                 ->whereDate('end_date', '>=', $dateStr)
                 ->exists();
 
-            // 3. Cek apakah sedang Izin (Approved)
+            // 3. Cek apakah sedang Izin (Approved) - SUDAH DIPERBAIKI
             $hasPermit = PermitRequest::where('employee_id', $employeeId)
                 ->where('status', 'Approved')
-                ->whereDate('permit_date', $dateStr)
+                ->whereDate('start_date', '<=', $dateStr)
+                ->whereDate('end_date', '>=', $dateStr)
                 ->exists();
 
             // 4. Jika bolong, buat record Alpha (Absent)
