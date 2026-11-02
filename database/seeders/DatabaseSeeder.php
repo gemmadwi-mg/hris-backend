@@ -14,7 +14,9 @@ class DatabaseSeeder extends Seeder
             TerCategorySeeder::class,
             PtkpGroupSeeder::class,
             TerRateSeeder::class,            // 2. Buat Roles dan tempelkan ke Permissions
-            OperationalDataSeeder::class, // 3. Buat Karyawan (pakai Role) dan data lainnya
+            OperationalDataSeeder::class,
+            // MasterDataSeeder::class,
+            // EmployeeSeeder::class
         ]);
     }
 }
